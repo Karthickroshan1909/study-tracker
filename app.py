@@ -7,7 +7,18 @@ from datetime import date, timedelta
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, url_for
 
 app = Flask(__name__)
-DB_PATH = os.path.join(os.path.dirname(__file__), "study_tracker.db")
+# Where the database file lives:
+# - the DB_PATH app setting wins if it is set;
+# - on Azure App Service (WEBSITE_SITE_NAME exists) we use /home/data, the folder
+#   that survives restarts (everything else on Azure is wiped when the app restarts);
+# - on your own computer the file sits next to app.py.
+_here = os.path.dirname(os.path.abspath(__file__))
+_default_dir = "/home/data" if os.environ.get("WEBSITE_SITE_NAME") else _here
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(_default_dir, "study_tracker.db")
+try:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+except OSError:
+    DB_PATH = os.path.join(_here, "study_tracker.db")
 
 
 # ---------- Database helpers ----------
@@ -319,6 +330,21 @@ def reset_all():
         db.execute("DELETE FROM sqlite_sequence")
         db.commit()
     return redirect(url_for("index"))
+
+
+@app.route("/health")
+def health():
+    """Shows where the data is stored, so you can check that it survives restarts."""
+    db = get_db()
+    exists = os.path.exists(DB_PATH)
+    return jsonify(
+        db_path=DB_PATH,
+        db_file_exists=exists,
+        db_size_bytes=os.path.getsize(DB_PATH) if exists else 0,
+        on_azure=bool(os.environ.get("WEBSITE_SITE_NAME")),
+        subjects=db.execute("SELECT COUNT(*) FROM subjects").fetchone()[0],
+        sessions=db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
+    )
 
 
 @app.route("/export")
